@@ -5,6 +5,7 @@ from rich.console import Console
 
 from alleleatlas.core.input import read_file_preview, detect_and_normalize_profile
 from alleleatlas.core.distances import compute_distance_matrices
+from alleleatlas.core.analysis import extract_clustering_thresholds
 from alleleatlas.cluster.pHierCC import phierCC
 from alleleatlas.cluster.HCCeval import evalHCC
 from alleleatlas.select_hc_breakpoints import select_and_plot_breakpoints, plot_group_counts_from_hiercc
@@ -64,61 +65,7 @@ def _collapse_large_profile(input_df, st_counts, outdir, target_nodes):
 
 # Backward compatibility: alias to core module
 _compute_distances = compute_distance_matrices
-
-
-def _extract_clustering_thresholds(results, labels):
-    """Extract and compute minimum clustering threshold from breakpoints and plateaus.
-    
-    Returns: (min_clustering_threshold, mst_drawing_threshold, bp_info)
-    """
-    chosen = results.get("chosen", [])
-    sil_plateaus = results.get("sil_plateaus", [])
-    nmi_plateaus = results.get("nmi_plateaus", [])
-    
-    bp_info = []
-    bp_indices = []
-    
-    # Extract breakpoints
-    for hc_level, idx, score, s, n in chosen:
-        hc_label = labels[idx] if (labels is not None and idx < len(labels)) else f'HC{hc_level}'
-        bp_info.append(hc_label)
-        if hc_label.startswith('HC'):
-            try:
-                hc_value = int(hc_label[2:])
-                bp_indices.append(hc_value)
-            except ValueError:
-                bp_indices.append(hc_level)
-        else:
-            bp_indices.append(hc_level)
-    
-    # Collect all candidate thresholds
-    all_candidate_thresholds = list(bp_indices)
-    
-    all_plateaus = sil_plateaus + nmi_plateaus
-    if all_plateaus:
-        for (p_start, p_end) in all_plateaus:
-            p_start_label = labels[p_start] if (labels is not None and p_start < len(labels)) else f'HC{p_start*100}'
-            if p_start_label.startswith('HC'):
-                try:
-                    hc_value = int(p_start_label[2:])
-                    all_candidate_thresholds.append(hc_value)
-                except ValueError:
-                    all_candidate_thresholds.append(p_start * 100)
-            else:
-                all_candidate_thresholds.append(p_start * 100)
-    
-    # Find min and second thresholds
-    min_clustering_threshold = 0
-    mst_drawing_threshold = None
-    if all_candidate_thresholds:
-        sorted_thresholds = sorted(set(all_candidate_thresholds))
-        min_clustering_threshold = sorted_thresholds[0]
-        if len(sorted_thresholds) > 1:
-            mst_drawing_threshold = sorted_thresholds[1]
-        else:
-            mst_drawing_threshold = sorted_thresholds[0]
-    
-    return min_clustering_threshold, mst_drawing_threshold, bp_info, sil_plateaus, nmi_plateaus
+_extract_clustering_thresholds = extract_clustering_thresholds
 
 
 def _run_breakpoint_analysis(outdir, found_eval, force):
