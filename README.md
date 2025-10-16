@@ -22,7 +22,7 @@ AlleleAtlas provides a complete pipeline for:
    - Minimum Spanning Tree (MST) network diagrams
 
 The pipeline is optimized for large datasets with **26x faster** profile loading via parquet caching and efficient distance matrix reuse.
-
+yes
 ---
 
 ## Installation
