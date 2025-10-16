@@ -240,11 +240,23 @@ def _run_mst_visualization(outdir, normalized_path, min_threshold, mst_threshold
         dist_dual: precomputed distance matrix
         force: if True, recompute even if cached
     """
+    from alleleatlas.visualization.mst import run_mst_visualization
+    
     mst_plot = outdir / 'mst_visualization.png'
     if mst_threshold is not None and (not mst_plot.exists() or force):
-        # NOTE: MST drawing functionality not yet implemented
-        # Placeholder for future Phase 3 implementation (visualization/mst.py)
-        console.print('[yellow]⚠[/yellow] MST drawing not yet implemented (Phase 3 refactoring)')
+        try:
+            console.print(f'[bold]Drawing MST:[/bold] collapse at {min_threshold}, lines at {mst_threshold}')
+            run_mst_visualization(
+                str(normalized_path),
+                str(outdir / 'hierCC.HierCC.gz'),
+                str(outdir),
+                collapse_threshold=min_threshold if min_threshold is not None else 0,
+                line_threshold=mst_threshold,
+                collapse_metadata=collapse_metadata,
+                precomputed_dist=dist_dual
+            )
+        except Exception as e:
+            console.print(f'[yellow]⚠[/yellow] Failed to draw MST: {e}')
     elif mst_plot.exists() and not force:
         console.print('[yellow]↷[/yellow] Using cached MST visualization')
     else:
