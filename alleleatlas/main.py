@@ -1,13 +1,12 @@
 import re
 from pathlib import Path
-from multiprocessing import Pool
 import pandas as pd
 from rich.console import Console
 
 from alleleatlas.core.input import read_file_preview, detect_and_normalize_profile
-from alleleatlas.cluster.pHierCC import phierCC, prepare_mat
+from alleleatlas.core.distances import compute_distance_matrices
+from alleleatlas.cluster.pHierCC import phierCC
 from alleleatlas.cluster.HCCeval import evalHCC
-from alleleatlas.cluster.getDistance import getDistance
 from alleleatlas.select_hc_breakpoints import select_and_plot_breakpoints, plot_group_counts_from_hiercc
 
 console = Console()
@@ -63,24 +62,8 @@ def _collapse_large_profile(input_df, st_counts, outdir, target_nodes):
     return normalized_path, None, st_counts
 
 
-def _compute_distances(normalized_path, nproc=4):
-    """Compute both dual and pairwise distance matrices.
-    
-    Returns: (dist_dual, dist_p)
-    """
-    console.print('Computing distance matrix...')
-    
-    mat, names = prepare_mat(normalized_path)
-    pool = Pool(nproc)
-    try:
-        dist_dual = getDistance(mat, 'dual_dist', pool, start=0, allowed_missing=0.03)
-        dist_p = getDistance(mat, 'p_dist', pool, start=0, allowed_missing=0.03)
-    finally:
-        pool.close()
-        pool.join()
-    
-    console.print('  ✓ Distance matrices computed')
-    return dist_dual, dist_p
+# Backward compatibility: alias to core module
+_compute_distances = compute_distance_matrices
 
 
 def _extract_clustering_thresholds(results, labels):
