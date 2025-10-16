@@ -51,7 +51,7 @@ def run(
 
     console.print(f'[green]Starting pipeline[/green] (force={force}): {profile} -> {outdir}')
     try:
-        main(str(profile), str(outdir), force=force)
+        main(str(profile), str(outdir), force=force, nproc=nproc)
         console.print('[bold green]✓ Pipeline finished successfully.[/bold green]')
     except Exception as e:
         console.print(f'[bold red]✗ Pipeline failed:[/bold red] {e}')

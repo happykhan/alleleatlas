@@ -214,7 +214,7 @@ def _run_umap_embeddings(outdir, normalized_path, force):
         console.print('[yellow]↷[/yellow] Using cached UMAP embeddings')
 
 
-def main(cgmlst_profiles, outdir, target_nodes=None, force=False):
+def main(cgmlst_profiles, outdir, target_nodes=None, force=False, nproc=4):
     """Main pipeline orchestrator for cgMLST clustering analysis.
     
     Eight-step pipeline:
@@ -232,6 +232,7 @@ def main(cgmlst_profiles, outdir, target_nodes=None, force=False):
         outdir (str): output directory
         target_nodes (int): target number of clusters for collapsing (auto-detect if None)
         force (bool): if True, recompute all steps even if cached (default: False)
+        nproc (int): number of parallel processes (default: 4)
     """
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -258,7 +259,7 @@ def main(cgmlst_profiles, outdir, target_nodes=None, force=False):
     # ========================================================================
     # STEP 3: Compute distances (or use cached if exists and not forced)
     # ========================================================================
-    dist_dual, dist_p = _compute_distances(str(normalized_path), nproc=4)
+    dist_dual, dist_p = _compute_distances(str(normalized_path), nproc=nproc)
     
     # ========================================================================
     # STEP 4: Run clustering and evaluation (or skip if cached and not forced)
