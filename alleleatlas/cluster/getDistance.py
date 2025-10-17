@@ -1,4 +1,5 @@
-import numpy as np, numba as nb, os
+import numpy as np
+import numba as nb
 from tempfile import NamedTemporaryFile
 import SharedArray as sa
 
@@ -17,7 +18,6 @@ def getDistance(data, func_name, pool, start=0, allowed_missing=0.0):
         sa.delete(dist_buf)
         #os.unlink(dist_buf[7:])
     return dist
-
 
 
 def __parallel_dist(mat_buf, func, dist_buf, mat_shape, pool, start=0, allowed_missing=0.0) :

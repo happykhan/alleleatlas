@@ -61,12 +61,6 @@ def get_silhouette2(data) :
     else :
         return 0.
 
-# def prepare_mat(profile_file) :
-#     mat = pd.read_csv(profile_file, sep='\t', header=None, dtype=str).values
-#     allele_columns = np.array([i == 0 or (not h.startswith('#')) for i, h in enumerate(mat[0])])
-#     mat = mat[1:, allele_columns]
-#     return mat
-
 
 def evalHCC(profile, cluster, output, stepwise, n_proc, precomputed_dist=None) :
     '''evalHCC evaluates a HierCC scheme using varied statistic summaries.

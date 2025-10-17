@@ -83,6 +83,8 @@ def detect_and_normalize_profile(cgmlst_profiles, remap_alleles=False):
         raise ValueError('Empty input file')
     input_type = 'unknown'
     ST_col_name = 'ST'
+    # TODO: Need to rewrite this to just cover the main formats we want to use. 
+    # TODO: Need some better error handling/reporting here.
     # remove legacy Name column if present
     if 'Name' in df.columns:
         input_type = 'regular'
