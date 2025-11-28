@@ -20,11 +20,10 @@ def main():
         description="AlleleAtlas: cgMLST clustering and visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  python alleleatlas.py cgmlst_data/profiles.csv output_dir/
-  python alleleatlas.py data.csv output/ --eps 1.5 --minpts 5
-  python alleleatlas.py data.csv output/ --force
-        """,
+            Examples:
+            python alleleatlas.py cgmlst_data/profiles.csv output_dir/
+            python alleleatlas.py data.csv output/ --force
+            """,
     )
 
     parser.add_argument(
@@ -39,16 +38,16 @@ Examples:
     )
 
     parser.add_argument(
-        "--eps",
-        type=float,
-        default=None,
-        help="DBSCAN eps parameter (default: auto-computed)",
+        "--k",
+        type=int,
+        default=50,
+        help="Number of neighbors for k-NN (default: 50)",
     )
     parser.add_argument(
-        "--minpts",
-        type=int,
-        default=3,
-        help="DBSCAN minPts parameter (default: 3)",
+        "--backend",
+        choices=["exact", "usearch"],
+        default="exact",
+        help="Distance backend to use",
     )
     parser.add_argument(
         "--force",
@@ -64,12 +63,12 @@ Examples:
 
     args = parser.parse_args()
 
-    # Create config
+    # Create config for the new approx-based pipeline (thin wrapper)
     config = ClusteringConfig(
         cgmlst_profiles=args.input,
         outdir=args.output,
-        dbscan_eps=args.eps,
-        dbscan_min_samples=args.minpts,
+        k=args.k,
+        backend=args.backend,
         force_recompute=args.force,
         nproc=args.nproc,
     )
@@ -80,7 +79,9 @@ Examples:
         console.print("\n✓ Pipeline finished successfully!")
         return 0
     except Exception as e:
-        console.print(f"\n✗ Pipeline failed: {e}", style="bold red")
+        # Escape markup characters in exception message to avoid Rich parsing errors
+        error_msg = str(e).replace('[', '\\[').replace(']', '\\]')
+        console.print(f"\n✗ Pipeline failed: {error_msg}", style="bold red")
         return 1
 
 
