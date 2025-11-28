@@ -162,3 +162,6 @@ cython_debug/
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Allow example MST PNGs (small, checked-in illustrations)
+!docs/examples/mst/*.png

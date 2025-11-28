@@ -165,6 +165,19 @@ alleleatlas/
 
 ## Performance Optimizations
 
+### MST Construction (10-100x Speedup)
+- **Algorithm**: k-Nearest Neighbors sparse pruning (k=50 default)
+- **Method**: Uses scipy.sparse with argpartition for O(n log k) nearest neighbor selection
+- **Memory**: Minimal O(nk) vs O(n²) for complete graphs
+- **Benchmarks**:
+  - 100 nodes: 0.001s (vs 0.3s for full sparse, 0.01s for complete)
+  - 1,000 nodes: 0.018s (vs 0.085s for full sparse, 1.8s for complete)
+  - 10,000 nodes: 1.0s (vs 13.2s for full sparse, skipped for complete)
+  - **54,000 profiles (production)**: ~1-2s estimated (vs minutes/hours for alternatives)
+- **Quality**: Guarantees MST connectivity while reducing edge set 50-1000x
+- **Automatic**: Applies k-NN for datasets >100 nodes, full sparse for smaller sets
+- **See Also**: [MST_BENCHMARK_RESULTS.md](MST_BENCHMARK_RESULTS.md) for detailed analysis
+
 ### Parquet Caching (26x Speedup)
 - **First load**: Parse TSV/CSV → create `.parquet` cache
 - **Subsequent loads**: Direct parquet read (2.0s vs 51.8s for 126MB file)
@@ -175,11 +188,13 @@ alleleatlas/
 - Distance matrix computed once
 - Reused for clustering evaluation and visualization
 - Eliminates redundant distance calculations
+- Pre-computed matrices can be loaded via `--distance-matrix` option
 
 ### Caching & Incremental Computation
 - All outputs are cached by default
 - Skip recomputation of cached steps
 - Use `--force` flag to recompute specific outputs
+
 
 ---
 

@@ -5,12 +5,16 @@ missing-aware allelic distance (count of differing loci where both
 profiles have non-missing values; missing coded as 0). It can build a
 USearch index and derive a k-NN sparse matrix compatible with the rest
 of the pipeline.
+
+Note: we keep the metric as a Python callable (Metric) rather than a
+numba-compiled function to avoid crashes seen with compiled pointers on
+some macOS/Python combos. This trades a small amount of speed for
+stability.
 """
 from __future__ import annotations
 
 import numpy as np
 import scipy.sparse as sp
-from numba import cfunc, types, carray
 
 
 def _to_int_profiles(profiles: np.ndarray) -> np.ndarray:
@@ -21,32 +25,27 @@ def _to_int_profiles(profiles: np.ndarray) -> np.ndarray:
 
 
 def _build_metric():
-    """Return a USearch CompiledMetric for cgMLST allelic distance."""
+    """Return a USearch Metric for cgMLST allelic distance."""
     try:
         from usearch.index import MetricKind, MetricSignature, CompiledMetric
     except ImportError as e:  # pragma: no cover - optional dep
         raise ImportError("USearch python bindings are required for backend='usearch'") from e
 
-    @cfunc(types.float32(types.CPointer(types.float32), types.CPointer(types.float32), types.int64))
-    def cgmlst_distance(a_ptr, b_ptr, n):
-        a = carray(a_ptr, n)
-        b = carray(b_ptr, n)
+    def cgmlst_distance(a, b):
         diff = 0
         comparable = 0
-        for i in range(n):
-            ai = int(a[i])
-            bi = int(b[i])
+        for ai, bi in zip(a, b):
             if ai == 0 or bi == 0:
                 continue
             comparable += 1
             if ai != bi:
                 diff += 1
         if comparable == 0:
-            return float(n)
+            return float(len(a))
         return float(diff)
 
     return CompiledMetric(
-        pointer=cgmlst_distance.address,
+        cgmlst_distance,
         kind=MetricKind.L2sq,  # nominal; real distance is provided
         signature=MetricSignature.ArrayArray,
     )
