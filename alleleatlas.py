@@ -60,6 +60,12 @@ def main():
         default=2,
         help="Number of processes for parallel computation (default: 2)",
     )
+    parser.add_argument(
+        "--supernode-layout",
+        choices=["spring", "grapetree"],
+        default="spring",
+        help="Layout for cluster backbone supernodes (spring|grapetree)",
+    )
 
     args = parser.parse_args()
 
@@ -71,6 +77,7 @@ def main():
         backend=args.backend,
         force_recompute=args.force,
         nproc=args.nproc,
+        supernode_layout=args.supernode_layout,
     )
 
     # Run pipeline

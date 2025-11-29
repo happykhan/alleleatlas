@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 from typing import Optional
+import csv
 import math
 import random
 import scipy.sparse as sp
@@ -18,6 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import typer
 from rich.console import Console
+from alleleatlas.mst_workflow import grapetree_layout
 
 
 def read_labels_from_tsv(path: str, n_total: int, preferred: str = 'ParaC serovars'):
@@ -140,6 +142,38 @@ def contract_subgraph(sub: sp.spmatrix, mapping: dict, nclusters: int) -> sp.csr
 
 def load_knn(path: str) -> sp.csr_matrix:
     return sp.load_npz(path)
+
+def single_linkage_components(sub: sp.spmatrix, threshold: Optional[float]):
+    """Return connected components after single-linkage cut at ``threshold``.
+
+    We build an MST for the subgraph, then union edges whose weight is
+    <= threshold. This mirrors single-linkage clustering while working
+    on sparse graphs without building a dense distance matrix.
+    """
+    if sub.shape[0] == 0:
+        return []
+    if threshold is None:
+        return [list(range(sub.shape[0]))]
+    try:
+        Gsub = nx.from_scipy_sparse_array(sub, edge_attribute='weight')
+    except Exception:
+        Gsub = nx.from_scipy_sparse_matrix(sub, edge_attribute='weight')
+    if Gsub.number_of_edges() == 0:
+        return [[i] for i in range(sub.shape[0])]
+    T = nx.minimum_spanning_tree(Gsub, weight='weight')
+    from networkx.utils import UnionFind
+    uf = UnionFind()
+    for n in T.nodes():
+        # access item to ensure it's added to the union-find structure
+        _ = uf[n]
+    for u, v, d in T.edges(data=True):
+        if d.get('weight', 1.0) <= threshold:
+            uf.union(u, v)
+    comps = {}
+    for n in T.nodes():
+        root = uf[n]
+        comps.setdefault(root, []).append(int(n))
+    return list(comps.values())
 
 
 def build_component_mst(M: sp.csr_matrix) -> nx.Graph:
@@ -315,10 +349,10 @@ def plot_mst(
         return
     cols = int(math.ceil(math.sqrt(ncomps)))
     rows = int(math.ceil(ncomps / cols))
-    padding = 40
+    padding = int(40 * grid_scale)
     # compute cell sizes proportional to component extents
-    cell_w = max(300, int(1024 / cols))
-    cell_h = max(300, int(1024 / rows))
+    cell_w = int(max(300, int(1024 / cols)) * grid_scale)
+    cell_h = int(max(300, int(1024 / rows)) * grid_scale)
     positions = []
     idx = 0
     for r in range(rows):
@@ -439,10 +473,21 @@ def plot_mst(
             except TypeError:
                 # older networkx may ignore connectionstyle for certain backends
                 nx.draw_networkx_edges(T2, node_pos, ax=ax, alpha=0.6, width=0.7)
-        if node_colors is None:
-            nx.draw_networkx_nodes(T2, node_pos, node_size=node_size, node_color=color_hex, ax=ax, linewidths=0.5)
+        # scale node size by cluster cardinality when collapsed
+        if nclusters < len(nodes):
+            cluster_sizes = {}
+            for local_idx, cid in mapping.items():
+                cluster_sizes[cid] = cluster_sizes.get(cid, 0) + 1
+            draw_sizes = [
+                node_size * max(1.0, math.sqrt(float(cluster_sizes.get(int(n), 1))))
+                for n in T2.nodes()
+            ]
         else:
-            nx.draw_networkx_nodes(T2, node_pos, node_size=node_size, node_color=node_colors, ax=ax, linewidths=0.5)
+            draw_sizes = node_size
+        if node_colors is None:
+            nx.draw_networkx_nodes(T2, node_pos, node_size=draw_sizes, node_color=color_hex, ax=ax, linewidths=0.5)
+        else:
+            nx.draw_networkx_nodes(T2, node_pos, node_size=draw_sizes, node_color=node_colors, ax=ax, linewidths=0.5)
     # if labels were provided, draw a legend mapping colors to labels
     if labels_path is not None and 'labels_all' in locals() and labels_all is not None:
         # create a small legend figure appended below main figure
@@ -482,6 +527,216 @@ def plot_mst(
     plt.savefig(out, dpi=150)
     console.print(f"Wrote MST plot: {out}")
 
+
+def plot_cluster_backbone(
+    knn: str,
+    out: str = 'cluster_backbone.png',
+    coarse_threshold: float = 0.0,
+    fine_threshold: float = 0.0,
+    min_component_size: int = 2,
+    supernode_scale: float = 0.08,
+    max_supernodes: int = 200,
+    max_local_nodes: int = 500,
+    supernode_layout: str = 'spring',
+    use_single_linkage: bool = True,
+    component_summary_out: Optional[str] = None,
+    supernode_size_exponent: float = 0.8,
+    supernode_size_base: float = 30.0,
+    supernode_size_scale: float = 6.0,
+    local_node_size_base: float = 6.0,
+    local_node_size_exponent: float = 0.5,
+    local_node_size_scale: float = 3.0,
+    edge_display_threshold: Optional[float] = None,
+    edge_cap: Optional[float] = None,
+    show_insets: bool = False,
+    grid_scale: float = 1.3,
+) -> None:
+    """Plot cluster supernodes (coarse components) with intra-cluster MST insets.
+
+    - coarse_threshold: edges <= this are used to form components (supernodes)
+    - fine_threshold: (deprecated for edges) retained for compatibility; use edge_display_threshold for supernode edges
+    - edge_display_threshold: only draw supernode edges with weight <= this (after capping)
+    - edge_cap: cap supernode edge weights to this value before layout/drawing
+    - show_insets: draw internal inset MSTs per supernode
+    """
+    console.print(f"Loading k-NN graph from: {knn}")
+    console.print(f"Coarse threshold: {coarse_threshold}" )
+    console.print(f"Edge display threshold: {edge_display_threshold}")
+    if edge_cap is not None:
+        console.print(f"[blue]Capping supernode edge weights at {edge_cap}[/blue]")
+    if show_insets:
+        console.print(f"[blue]Insets enabled (fine threshold {fine_threshold}, max_local_nodes {max_local_nodes})[/blue]")
+    else:
+        console.print("[blue]Insets disabled[/blue]")
+    M = load_knn(knn)
+    A = (M + M.T) / 2
+    if use_single_linkage:
+        console.print("[blue]Using single-linkage (MST) to define coarse components[/blue]")
+        ncomp, labels = sp.csgraph.connected_components(A, directed=False)
+        components = []
+        for comp_id in range(ncomp):
+            nodes = np.where(labels == comp_id)[0]
+            if len(nodes) == 0:
+                continue
+            sub = A[nodes[:, None], nodes]
+            clusters_local = single_linkage_components(sub, coarse_threshold)
+            for comp in clusters_local:
+                components.append([int(nodes[i]) for i in comp])
+    else:
+        coo = A.tocoo()
+        mask = coo.data <= coarse_threshold
+        G_coarse = nx.Graph()
+        G_coarse.add_nodes_from(range(A.shape[0]))
+        for i, j, w in zip(coo.row[mask], coo.col[mask], coo.data[mask]):
+            G_coarse.add_edge(int(i), int(j), weight=float(w))
+        components = [list(c) for c in nx.connected_components(G_coarse)]
+
+    components = [c for c in components if len(c) >= min_component_size]
+    if len(components) > max_supernodes:
+        components = sorted(components, key=len, reverse=True)[:max_supernodes]
+        console.print(f"[yellow]Too many supernodes; keeping top {max_supernodes} by size[/yellow]")
+    if not components:
+        console.print("[yellow]No coarse components found for cluster backbone plot[/yellow]")
+        return
+
+    if component_summary_out:
+        mode = "single_linkage" if use_single_linkage else "threshold_graph"
+        with open(component_summary_out, "w", newline="") as fh:
+            writer = csv.writer(fh, delimiter='\t')
+            writer.writerow(["supernode_id", "size", "mode", "coarse_threshold", "example_members"])
+            for idx, comp in enumerate(components):
+                members_preview = ','.join(str(x) for x in comp[:50])
+                writer.writerow([idx, len(comp), mode, coarse_threshold, members_preview])
+        console.print(f"[green]Wrote component summary:[/green] {component_summary_out}")
+    console.print(f"[blue]Supernodes after coarse collapse:[/blue] {len(components)}")
+
+    # compute medoid per component using shortest-path distances within the component
+    medoids = []
+    comp_sizes = []
+    sub_msts = []
+    sub_sizes = []
+    for comp_nodes in components:
+        comp_sizes.append(len(comp_nodes))
+        # optionally cap local inset size for very large components
+        if len(comp_nodes) > max_local_nodes:
+            comp_nodes_local = comp_nodes[:max_local_nodes]
+            if show_insets:
+                console.print(f"[yellow]Capping local MST inset to {max_local_nodes} nodes (component size {len(comp_nodes)})[/yellow]")
+        else:
+            comp_nodes_local = comp_nodes
+
+        sub = A[comp_nodes_local, :][:, comp_nodes_local]
+        if show_insets:
+            # collapse locally with single linkage at fine_threshold to simplify inset
+            clusters_local = single_linkage_components(sub, fine_threshold)
+            mapping_local = {}
+            for cid, comp in enumerate(clusters_local):
+                for v in comp:
+                    mapping_local[v] = cid
+            C_local = contract_subgraph(sub, mapping_local, len(clusters_local))
+            if C_local.nnz > 0:
+                try:
+                    G_fine = nx.from_scipy_sparse_array(C_local)
+                except Exception:
+                    G_fine = nx.from_scipy_sparse_matrix(C_local)
+                T_local = nx.minimum_spanning_tree(G_fine, weight='weight') if G_fine.number_of_edges() > 0 else G_fine
+            else:
+                T_local = nx.Graph()
+                T_local.add_nodes_from(range(len(clusters_local)))
+            sub_msts.append(T_local)
+            sub_sizes.append([len(c) for c in clusters_local])
+
+        # medoid by shortest-path sum
+        dist_mat = sp.csgraph.dijkstra(sub, directed=False, unweighted=False)
+        dist_sums = np.where(np.isfinite(dist_mat), dist_mat, 0).sum(axis=1)
+        medoid_local_idx = int(np.argmin(dist_sums))
+        medoids.append(comp_nodes_local[medoid_local_idx])
+
+    # build supernode distance matrix using shortest paths between medoids
+    medoid_indices = np.array(medoids, dtype=int)
+    super_dists = sp.csgraph.dijkstra(A, indices=medoid_indices, directed=False, unweighted=False)[:, medoid_indices]
+    super_dists = np.where(np.isfinite(super_dists), super_dists, super_dists.max(initial=1.0) * 2)
+
+    # supernode graph and MST
+    super_edges_rows, super_edges_cols = np.triu_indices_from(super_dists, k=1)
+    super_G = nx.Graph()
+    super_G.add_nodes_from(range(len(components)))
+    cap_count = 0
+    for i, j in zip(super_edges_rows, super_edges_cols):
+        w = float(super_dists[i, j])
+        if edge_cap is not None:
+            if w > edge_cap:
+                cap_count += 1
+                w = edge_cap
+        super_G.add_edge(int(i), int(j), weight=w)
+    if edge_cap is not None:
+        console.print(f"[blue]Capped {cap_count} supernode edges at {edge_cap}[/blue]")
+    if super_G.number_of_edges() > 0:
+        super_T = nx.minimum_spanning_tree(super_G, weight='weight')
+    else:
+        super_T = super_G
+    edges_to_draw = list(super_T.edges(data=True))
+    if edge_display_threshold is not None:
+        edges_to_draw = [(u, v, d) for u, v, d in edges_to_draw if d.get('weight', 0.0) <= edge_display_threshold]
+        console.print(f"[blue]Drawing {len(edges_to_draw)} super-edges <= {edge_display_threshold}[/blue]")
+
+    # layout supernodes with optional Grapetree radial layout and NaN-safe fallback
+    pos_super = {}
+    if super_T.number_of_nodes() > 0:
+        if supernode_layout == 'grapetree':
+            edges_for_layout = [(int(u), int(v), float(d.get('weight', 1.0))) for u, v, d in super_T.edges(data=True)]
+            pos_super = grapetree_layout(edges_for_layout, root=0)
+        if not pos_super:
+            pos_super = nx.spring_layout(super_T, weight='weight', seed=42)
+        arr = np.array(list(pos_super.values())) if pos_super else np.empty((0, 2))
+        if np.isnan(arr).any() or np.isinf(arr).any():
+            pos_super = nx.spring_layout(super_T, weight=None, seed=42)
+            arr = np.array(list(pos_super.values())) if pos_super else np.empty((0, 2))
+        if np.isnan(arr).any() or np.isinf(arr).any():
+            pos_super = nx.circular_layout(super_T)
+
+    # plot
+    fig, ax = plt.subplots(figsize=(10 * grid_scale, 8 * grid_scale))
+    # draw supernode MST
+    if edges_to_draw:
+        nx.draw_networkx_edges(super_T.edge_subgraph([(u, v) for u, v, _ in edges_to_draw]), pos_super, ax=ax, alpha=0.6, width=1.5)
+    node_sizes = [
+        supernode_size_base + (float(s) ** supernode_size_exponent) * supernode_size_scale
+        for s in comp_sizes
+    ]
+    nx.draw_networkx_nodes(super_T, pos_super, node_size=node_sizes, node_color='tab:blue', alpha=0.9, ax=ax)
+
+    # draw local MSTs as insets around each supernode position
+    if show_insets:
+        for idx, T_local in enumerate(sub_msts):
+            if T_local.number_of_nodes() == 0:
+                continue
+            center = pos_super.get(idx, np.array([0.0, 0.0]))
+            # scale inset by component size
+            scale = supernode_scale * max(1.0, np.sqrt(comp_sizes[idx]))
+            pos_local = nx.spring_layout(T_local, seed=idx)
+            arr_local = np.array(list(pos_local.values())) if pos_local else np.empty((0, 2))
+            if np.isnan(arr_local).any() or np.isinf(arr_local).any():
+                pos_local = nx.spring_layout(T_local, weight=None, seed=idx)
+                arr_local = np.array(list(pos_local.values())) if pos_local else np.empty((0, 2))
+            if np.isnan(arr_local).any() or np.isinf(arr_local).any():
+                pos_local = nx.circular_layout(T_local)
+            pos_local_global = {n: center + scale * (np.array(p)) for n, p in pos_local.items()}
+            nx.draw_networkx_edges(T_local, pos_local_global, ax=ax, alpha=0.3, width=0.5)
+            if idx < len(sub_sizes) and len(sub_sizes[idx]) == T_local.number_of_nodes():
+                sizes_local = [
+                    local_node_size_base + (float(s) ** local_node_size_exponent) * local_node_size_scale
+                    for s in sub_sizes[idx]
+                ]
+            else:
+                sizes_local = 10
+            nx.draw_networkx_nodes(T_local, pos_local_global, ax=ax, node_size=sizes_local, node_color='tab:orange', alpha=0.7)
+
+    ax.axis('off')
+    plt.tight_layout()
+    plt.savefig(out, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    console.print(f"[green]Wrote cluster backbone plot:[/green] {out}")
 
 @app.command()
 def cli(
