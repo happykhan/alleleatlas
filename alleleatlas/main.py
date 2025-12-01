@@ -96,7 +96,8 @@ def run(
             console.print(f'[green]Building exact k-NN (k={k}) via distances_exact[/green]')
             knn_mat = distances_exact.knn_from_profiles(X, k)
         elif backend == 'usearch':
-            from alleleatlas.backends.usearch_backend import build_knn as usearch_build_knn
+            # from alleleatlas.backends.usearch_backend import build_knn as usearch_build_knn
+            from alleleatlas.backends.usearch_enhance_backend import build_knn as usearch_build_knn
             console.print(f'[green]Building k-NN (k={k}) via USearch custom metric[/green]')
             knn_mat, index_obj, _ = usearch_build_knn(X, k, return_index=True, threads=nproc)
         else:
@@ -180,33 +181,149 @@ def run(
                 console.print(f"[green]Wrote cluster sizes:[/green] {cluster_csv}")
                 g_full = clustering.network
 
+            from alleleatlas.viz.single_linkage_sunburst import plot_single_linkage_sunburst
+            console.print("[green]Drawing cluster sunburst plot[/green]")
+            plot_single_linkage_sunburst(
+                knn= str(knn_path),
+                thresholds=[50,300, 500, 600, 1500],  # inner ring = 400, outer ring = 50
+                out= str(p / f"{base}_{backend}_cluster_sunburst.png"),
+                min_fraction=0.01,
+            )
+            console.print(f"[green]Wrote cluster sunburst plot:[/green] {p / f'{base}_{backend}_cluster_sunburst.png'}")
+            console.print("[green]Drawing cluster backbone plot[/green]")
             # Draw cluster backbone plot (custom thresholds)
             mst_and_plot.plot_cluster_backbone(
                 str(knn_path),
-                str(p / f"{base}_{backend}_cluster_mst.png"),
-                coarse_threshold=250.0,
-                edge_display_threshold=800.0,
-                edge_cap=1100.0,
-                show_insets=False,
-                grid_scale=1.5,
-                supernode_layout=supernode_layout,
+                str(p / f"{base}_{backend}_cluster_mst_mds.png"),
                 component_summary_out=str(p / f"{base}_{backend}_supernodes.tsv"),
+                layout_mode='mds',
+                coarse_threshold=50,
+                edge_display_threshold=500,
+                max_supernodes=2000,
+                max_local_nodes=3000,
+                color_edges_by_weight=True,
             )
+            mst_and_plot.plot_cluster_backbone(
+                str(knn_path),
+                str(p / f"{base}_{backend}_cluster_mst_top.png"),
+                layout_mode='topology',
+                coarse_threshold=50,
+                edge_display_threshold=500,
+                max_supernodes=2000,
+                max_local_nodes=3000,
+                color_edges_by_weight=True,
+            )            
+            mst_and_plot.plot_cluster_backbone(
+                str(knn_path),
+                str(p / f"{base}_{backend}_cluster_mst_top_300.png"),
+                layout_mode='topology',
+                coarse_threshold=300,
+                edge_display_threshold=600,
+                max_supernodes=2000,
+                max_local_nodes=3000,
+                color_edges_by_weight=True,
+            )                   
+            mst_and_plot.plot_cluster_backbone(
+                str(knn_path),
+                str(p / f"{base}_{backend}_cluster_mst_top_500.png"),
+                layout_mode='topology',
+                coarse_threshold=500,
+                edge_display_threshold=600,
+                max_supernodes=2000,
+                max_local_nodes=3000,
+                color_edges_by_weight=True,
+            )                   
         except Exception as e:  # pragma: no cover - visualization is best-effort
             console.print(f"[red]Cluster graph generation failed:[/red] {e}")
-            # fallback to MST plot of the original k-NN if clustering failed
-            try:
-                # if mst_and_plot is not None:
-                #     mst_and_plot.plot_mst(
-                #         str(knn_path),
-                #         out=str(p / f"{base}_{backend}_mst.png"),
-                #         collapse_threshold=None,
-                #         labels_path=None,
-                #         use_embedding_init=False,
-                #     )
-                    console.print(f"[yellow]Fallback MST plot written for {backend} backend[/yellow]")
-            except Exception as e2:
-                console.print(f"[red]Fallback MST plotting also failed:[/red] {e2}")
+
+    # Diagnostics applicable to any backend
+    try:
+        from alleleatlas.viz.cluster_diagnostics import run_cluster_diagnostics
+
+        console.print("[green]Running clustering diagnostics[/green]")
+        diag_prefix = p / f"{base}_{backend}_diagnostics"
+        run_cluster_diagnostics(
+            knn=str(knn_path),
+            coarse_threshold=50,
+            min_component_size=10,
+            edge_display_threshold=500,
+            out_prefix=str(diag_prefix),
+        )
+    except Exception as e:  # pragma: no cover - best-effort diagnostics
+        console.print(f"[red]Cluster diagnostics failed:[/red] {e}")
+
+    # Hull-based supernode view (all backends)
+    try:
+        from alleleatlas.viz.knn_hulls import plot_knn_hulls
+
+        console.print("[green]Drawing hull-based cluster plot[/green]")
+        plot_knn_hulls(
+            knn=str(knn_path),
+            out=str(p / f"{base}_{backend}_cluster_hulls.png"),
+            coarse_threshold=50,
+            min_component_size=10,
+            max_supernodes=800,
+            max_local_nodes=1000,
+            edge_display_threshold=500,
+            hull_threshold=None,
+            min_hull_nodes=5,
+            layout_mode="mds",
+            draw_edges=True,
+            draw_nodes=True,
+            random_seed=42,
+        )
+        plot_knn_hulls(
+            knn=str(knn_path),
+            out=str(p / f"{base}_{backend}_cluster_hulls_top.png"),
+            coarse_threshold=50,
+            min_component_size=10,
+            max_supernodes=800,
+            max_local_nodes=1000,
+            edge_display_threshold=500,
+            hull_threshold=None,
+            min_hull_nodes=5,
+            layout_mode="topology",
+            draw_edges=True,
+            draw_nodes=True,
+            random_seed=42,
+        )        
+        plot_knn_hulls(
+            knn=str(knn_path),
+            out=str(p / f"{base}_{backend}_cluster_hulls_top_300.png"),
+            coarse_threshold=300,
+            min_component_size=10,
+            max_supernodes=800,
+            max_local_nodes=1000,
+            edge_display_threshold=500,
+            hull_threshold=600,
+            min_hull_nodes=5,
+            layout_mode="topology",
+            draw_edges=True,
+            draw_nodes=True,
+            random_seed=42,
+        )            
+    except Exception as e:  # pragma: no cover - best-effort visualization
+        console.print(f"[red]Hull plot failed:[/red] {e}")
+
+    # Single-linkage sweep summary (all backends)
+    try:
+        from alleleatlas.single_linkage_eval import run_single_linkage_eval
+
+        console.print("[green]Running single-linkage evaluation[/green]")
+        sle_prefix = p / f"{base}_{backend}_single_linkage"
+        run_single_linkage_eval(
+            knn=str(knn_path),
+            out_prefix=str(sle_prefix),
+            n_levels=40,
+            qmin=0.05,
+            qmax=0.95,
+            silhouette=False,
+            threshold_step=50,
+            threshold_max=2100,
+            profiles_path=str(parquet_path) if 'parquet_path' in locals() else None,
+        )
+    except Exception as e:  # pragma: no cover - best-effort analysis
+        console.print(f"[red]Single-linkage eval failed:[/red] {e}")
 
 def run_pipeline(config: ClusteringConfig) -> Dict[str, Any]:
     """Run pipeline given a ClusteringConfig and return artifact metadata.

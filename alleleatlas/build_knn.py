@@ -20,12 +20,14 @@ console = Console()
 app = typer.Typer()
 
 
-def load_profiles_from_parquet(path: str) -> np.ndarray:
+def load_profiles_from_parquet(path: str, missing_filter = 0.1) -> np.ndarray:
     """Load the parquet file and return an (n, d) numpy array of int64 profiles.
 
     This function expects the parquet produced by `convert_to_parquet` where
     ST is the first column and subsequent columns are integer loci. We return
-    the loci-only matrix (drop ST column).
+    the loci-only matrix (drop ST column) and optionally filter rows whose
+    missing proportion exceeds ``missing_filter`` (treating 0 and NaN as
+    missing).
     """
     import pandas as pd
     df = pd.read_parquet(path)
@@ -40,6 +42,11 @@ def load_profiles_from_parquet(path: str) -> np.ndarray:
     # sentinel heuristic: values much larger than typical allele values
     sentinel_thresh = 1e8
     arr[arr > sentinel_thresh] = np.nan
+    arr[arr == 0] = np.nan
+    # drop rows with too much missing data
+    if missing_filter is not None:
+        missing_ratio = np.isnan(arr).mean(axis=1)
+        arr = arr[missing_ratio <= missing_filter]
     return arr
 
 
@@ -67,12 +74,6 @@ def cli(
         from alleleatlas import distances_exact
     elif backend == 'usearch':
         from alleleatlas.backends.usearch_backend import build_knn as usearch_build_knn
-    elif backend == 'hnsw':
-        from alleleatlas.backends.hnsw import build_knn
-    elif backend == 'minhash':
-        from alleleatlas.backends.minhash_lsh import build_knn
-    elif backend == 'sklearn':
-        from alleleatlas.backends.sklearn_nn import build_knn
     else:
         console.print(f"[red]Unknown backend:[/red] {backend}")
         raise typer.Exit(code=1)
@@ -82,10 +83,6 @@ def cli(
         knn_mat = distances_exact.knn_from_profiles(X, k)
     elif backend == 'usearch':
         knn_mat = usearch_build_knn(X, k, dtype=usearch_dtype)
-    elif backend == 'hnsw':
-        knn_mat = build_knn(X, k, ef_construction=hnsw_ef_construction, M=hnsw_M, ef_search=hnsw_ef_search)
-    elif backend == 'minhash':
-        knn_mat = build_knn(X, k, num_perm=num_perm, threshold=threshold)
     else:
         knn_mat = build_knn(X, k)
     import scipy.sparse as sp
